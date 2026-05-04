@@ -1,0 +1,117 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  Serverless To-Do List Application
+  SAM template defining DynamoDB, Lambda, and API Gateway resources
+  with least-privilege IAM policies.
+
+# ============================================================
+# Global Settings — applied to all Lambda functions
+# ============================================================
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: python3.12
+    MemorySize: 128
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref TodosTable
+
+# ============================================================
+# Resources
+# ============================================================
+Resources:
+
+  # ----------------------------------------------------------
+  # DynamoDB Table — Stores todo items
+  # Partition key: id (String)
+  # PAY_PER_REQUEST = on-demand pricing (no capacity planning)
+  # ----------------------------------------------------------
+  TodosTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: TodosTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  # ----------------------------------------------------------
+  # API Gateway — REST API with CORS enabled
+  # ----------------------------------------------------------
+  TodoApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type'"
+        AllowOrigin: "'*'"
+
+  # ----------------------------------------------------------
+  # Lambda Function — Single function handling all CRUD routes
+  # IAM policy scoped to only the TodosTable and CloudWatch Logs
+  # ----------------------------------------------------------
+  TodoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: TodoFunction
+      Handler: app.lambda_handler
+      CodeUri: lambda/
+      Description: Handles CRUD operations for the To-Do List app
+      Policies:
+        # Least-privilege: only allow CRUD on the specific table
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TodosTable
+      Events:
+        # GET /todos — List all todos
+        GetTodos:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TodoApi
+            Path: /todos
+            Method: GET
+
+        # POST /todos — Create a new todo
+        CreateTodo:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TodoApi
+            Path: /todos
+            Method: POST
+
+        # PUT /todos/{id} — Update a todo
+        UpdateTodo:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TodoApi
+            Path: /todos/{id}
+            Method: PUT
+
+        # DELETE /todos/{id} — Delete a todo
+        DeleteTodo:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TodoApi
+            Path: /todos/{id}
+            Method: DELETE
+
+# ============================================================
+# Outputs — Values needed after deployment
+# ============================================================
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL (use this in frontend app.js)
+    Value: !Sub "https://${TodoApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+
+  TodoFunctionArn:
+    Description: ARN of the Lambda function
+    Value: !GetAtt TodoFunction.Arn
+
+  DynamoDBTableName:
+    Description: Name of the DynamoDB table
+    Value: !Ref TodosTable
